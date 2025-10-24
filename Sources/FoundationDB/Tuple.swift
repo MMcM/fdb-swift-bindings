@@ -172,21 +172,21 @@ public struct Tuple: Sendable, Hashable, Equatable {
     }
 }
 
-struct TupleNil: TupleElement {
-    func encodeTuple() -> FDB.Bytes {
+public struct TupleNil: TupleElement {
+    public func encodeTuple() -> FDB.Bytes {
         return [TupleTypeCode.null.rawValue]
     }
 
-    static func decodeTuple(from _: FDB.Bytes, at _: inout Int) throws -> TupleNil {
+    public static func decodeTuple(from _: FDB.Bytes, at _: inout Int) throws -> TupleNil {
         return TupleNil()
     }
 
-    static func == (lhs: TupleNil, rhs: TupleNil) -> Bool {
+    public static func == (lhs: TupleNil, rhs: TupleNil) -> Bool {
         // All TupleNil instances are equal (representing null/nil)
         return true
     }
 
-    func hash(into hasher: inout Hasher) {
+    public func hash(into hasher: inout Hasher) {
         // Use a constant value for consistency with the null type code
         hasher.combine(TupleTypeCode.null.rawValue)
     }
@@ -554,5 +554,11 @@ extension UInt64: TupleElement {
                 "Negative value \(value) cannot be converted to UInt64")
         }
         return UInt64(value)
+    }
+}
+
+extension Tuple: CustomStringConvertible {
+    public var description: String {
+        elements.description
     }
 }
