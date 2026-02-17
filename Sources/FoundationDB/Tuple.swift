@@ -43,16 +43,6 @@ enum TupleTypeCode: UInt8, CaseIterable {
     case versionstamp = 0x33
 }
 
-public protocol TupleElement: Sendable, Hashable, Equatable {
-    func encodeTuple() -> FDB.Bytes
-    static func decodeTuple(from bytes: FDB.Bytes, at offset: inout Int) throws -> Self
-}
-
-// TODO: Make it a TypedTuple so that we don't have to typecast manually.
-/// A tuple represents an ordered collection of elements that can be encoded to and decoded from bytes.
-///
-/// Tuples can be used as keys in FoundationDB, and their encoding preserves lexicographic ordering.
-///
 /// ## Equality and Hashing
 ///
 /// Tuple equality is based on the encoded byte representation of each element, which matches
@@ -69,36 +59,181 @@ public protocol TupleElement: Sendable, Hashable, Equatable {
 ///
 /// These semantic differences ensure consistency with FoundationDB's tuple ordering and are
 /// important when using tuples as dictionary keys or in sets.
-public struct Tuple: Sendable, Hashable, Equatable {
-    private let elements: [any TupleElement]
 
-    public init(_ elements: any TupleElement...) {
+@nonexhaustive
+public enum TupleElement: Sendable, Hashable, Equatable, Comparable {
+    case null
+    case bytes(FDB.Bytes)
+    case string(String)
+    case nested(Tuple)
+    case int(Int64)
+    case float(Float)
+    case double(Double)
+    case bool(Bool)
+    case uuid(UUID)
+
+    func encode() -> FDB.Bytes {
+        switch self {
+        case .null:
+            return [TupleTypeCode.null.rawValue]
+        case let .bytes(b):
+            return b.encodeTuple()
+        case let .string(s):
+            return s.encodeTuple()
+        case let .nested(t):
+            return t.encodeTuple()
+        case let .int(i):
+            return i.encodeTuple()
+        case let .float(f):
+            return f.encodeTuple()
+        case let .double(d):
+            return d.encodeTuple()
+        case let .bool(b):
+            return b.encodeTuple()
+        case let .uuid(u):
+            return u.encodeTuple()
+        }
+    }
+
+    public static func == (lhs: TupleElement, rhs: TupleElement) -> Bool {
+        switch lhs {
+        case .null:
+            switch rhs {
+            case .null:
+                return true
+            default:
+                return false
+            }
+        case let .bytes(bl):
+            switch rhs {
+            case let .bytes(br):
+                return bl == br
+            default:
+                return false
+            }
+        case let .string(sl):
+            switch rhs {
+            case let .string(sr):
+                return sl == sr
+            default:
+                return false
+            }
+        case let .nested(tl):
+            switch rhs {
+            case let .nested(tr):
+                return tl == tr
+            default:
+                return false
+            }
+        case let .int(il):
+            switch rhs {
+            case let .int(ir):
+                return il == ir
+            default:
+                return false
+            }
+        case let .float(fl):
+            switch rhs {
+            case let .float(fr):
+                return fl.bitPattern == fr.bitPattern
+            default:
+                return false
+            }
+        case let .double(dl):
+            switch rhs {
+            case let .double(dr):
+                return dl.bitPattern == dr.bitPattern
+            default:
+                return false
+            }
+        case let .bool(bl):
+            switch rhs {
+            case let .bool(br):
+                return bl == br
+            default:
+                return false
+            }
+        case let .uuid(ul):
+            switch rhs {
+            case let .uuid(ur):
+                return ul == ur
+            default:
+                return false
+            }
+        }
+    }
+
+    public static func < (lhs: TupleElement, rhs: TupleElement) -> Bool {
+        lhs.encode().lexicographicallyPrecedes(rhs.encode())
+    }
+}
+
+// public protocol for converting between Swift native types and Tuple element types.
+public protocol TupleElementConvertible {
+    func tupleElement() -> TupleElement
+
+    static func fromTuple(element: TupleElement?) -> Self?
+}
+
+extension TupleElement: TupleElementConvertible {
+    public func tupleElement() -> TupleElement {
+        self
+    }
+
+    public static func fromTuple(element: TupleElement?) -> TupleElement? {
+        element
+    }
+}
+
+// internal protocol for converting between Tuple elements and byte strings.
+protocol TupleCodable {
+    func encodeTuple() -> FDB.Bytes
+    static func decodeTuple(from bytes: FDB.Bytes, at offset: inout Int) throws -> Self
+}
+
+// TODO: Make a TypedTuple so that we don't have to typecast manually.
+/// A tuple represents an ordered collection of elements that can be encoded to and decoded from bytes.
+///
+/// Tuples can be used as keys in FoundationDB, and their encoding preserves lexicographic ordering.
+///
+public struct Tuple: Sendable, Hashable, Equatable, Comparable, CustomStringConvertible {
+    // TODO: Any issues with making this public?
+    public let elements: [TupleElement]
+
+    public init(_ elements: [TupleElement]) {
         self.elements = elements
     }
 
-    public init(_ elements: [any TupleElement]) {
-        self.elements = elements
+    public init(_ elements: [TupleElementConvertible]) {
+        self.init(elements.map { $0.tupleElement() })
     }
 
-    public subscript(index: Int) -> (any TupleElement)? {
+    public init(_ elements: TupleElementConvertible...) {
+        self.init(elements)
+    }
+
+    // TODO: Result is optional, like a Dictionary and not like a Collection. Is that right?
+    //  Should this implement more of [RandomAccess]Collection or is using elements array sufficient?
+
+    public subscript(index: Int) -> TupleElement? {
         guard index >= 0, index < elements.count else { return nil }
         return elements[index]
     }
 
     public var count: Int {
-        return elements.count
+        elements.count
     }
 
     public func encode() -> FDB.Bytes {
         var result = FDB.Bytes()
         for element in elements {
-            result.append(contentsOf: element.encodeTuple())
+            result.append(contentsOf: element.encode())
         }
         return result
     }
 
-    public static func decode(from bytes: FDB.Bytes) throws -> [any TupleElement] {
-        var elements: [any TupleElement] = []
+    public static func decode(from bytes: FDB.Bytes) throws -> Self {
+        var elements: [TupleElement] = []
         var offset = 0
 
         while offset < bytes.count {
@@ -107,93 +242,79 @@ public struct Tuple: Sendable, Hashable, Equatable {
 
             switch typeCode {
             case TupleTypeCode.null.rawValue:
-                elements.append(TupleNil())
+                elements.append(TupleElement.null)
             case TupleTypeCode.bytes.rawValue:
                 let element = try FDB.Bytes.decodeTuple(from: bytes, at: &offset)
-                elements.append(element)
+                elements.append(element.tupleElement())
             case TupleTypeCode.string.rawValue:
                 let element = try String.decodeTuple(from: bytes, at: &offset)
-                elements.append(element)
+                elements.append(element.tupleElement())
             case TupleTypeCode.boolFalse.rawValue, TupleTypeCode.boolTrue.rawValue:
                 let element = try Bool.decodeTuple(from: bytes, at: &offset)
-                elements.append(element)
+                elements.append(element.tupleElement())
             case TupleTypeCode.float.rawValue:
                 let element = try Float.decodeTuple(from: bytes, at: &offset)
-                elements.append(element)
+                elements.append(element.tupleElement())
             case TupleTypeCode.double.rawValue:
                 let element = try Double.decodeTuple(from: bytes, at: &offset)
-                elements.append(element)
+                elements.append(element.tupleElement())
             case TupleTypeCode.uuid.rawValue:
                 let element = try UUID.decodeTuple(from: bytes, at: &offset)
-                elements.append(element)
+                elements.append(element.tupleElement())
             case TupleTypeCode.intZero.rawValue:
-                elements.append(0)
+                elements.append(TupleElement.int(0))
             case TupleTypeCode.negativeIntStart.rawValue ... TupleTypeCode.positiveIntEnd.rawValue:
                 let element = try Int64.decodeTuple(from: bytes, at: &offset)
-                elements.append(element)
+                elements.append(element.tupleElement())
             case TupleTypeCode.nested.rawValue:
                 let element = try Tuple.decodeTuple(from: bytes, at: &offset)
-                elements.append(element)
+                elements.append(element.tupleElement())
             default:
                 throw TupleError.invalidDecoding("Unknown type code: \(typeCode)")
             }
         }
 
-        return elements
+        return Self(elements)
     }
 
-    public static func == (lhs: Tuple, rhs: Tuple) -> Bool {
-        guard lhs.count == rhs.count else { return false }
-
-        for i in 0..<lhs.count {
-            // Swift's type system doesn't allow comparing `any Protocol` existentials directly,
-            // even though TupleElement requires Equatable conformance. We compare encoded bytes
-            // instead, which is semantically correct since tuple encoding is canonical:
-            // equal values always produce equal encodings.
-            //
-            // Note: This means Float/Double comparison follows bit-pattern equality rather than
-            // IEEE 754 equality (e.g., +0.0 and -0.0 are unequal, NaN values with the same bit
-            // pattern are equal). See the Tuple documentation for details.
-            if lhs.elements[i].encodeTuple() != rhs.elements[i].encodeTuple() {
+    public static func < (lhs: Tuple, rhs: Tuple) -> Bool {
+        let lc = lhs.count
+        let rc = rhs.count
+        for i in 0..<min(lc, rc) {
+            let le = lhs.elements[i]
+            let re = rhs.elements[i]
+            if le < re {
+                return true
+            }
+            if le > re {
                 return false
             }
         }
-        return true
+        return lc < rc
     }
 
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(elements.count)
-        for element in elements {
-            // Swift's type system doesn't allow hashing `any Protocol` existentials directly,
-            // even though TupleElement requires Hashable conformance. We hash encoded bytes
-            // instead, which ensures consistency with the equality implementation above.
-            hasher.combine(element.encodeTuple())
+    public var description: String {
+        elements.description
+    }
+}
+
+extension String: TupleElementConvertible {
+    public func tupleElement() -> TupleElement {
+        .string(self)
+    }
+
+    public static func fromTuple(element: TupleElement?) -> String? {
+        switch element {
+        case let .string(s):
+            return s
+        default:
+            return nil
         }
     }
 }
 
-struct TupleNil: TupleElement {
+extension String: TupleCodable {
     func encodeTuple() -> FDB.Bytes {
-        return [TupleTypeCode.null.rawValue]
-    }
-
-    static func decodeTuple(from _: FDB.Bytes, at _: inout Int) throws -> TupleNil {
-        return TupleNil()
-    }
-
-    static func == (lhs: TupleNil, rhs: TupleNil) -> Bool {
-        // All TupleNil instances are equal (representing null/nil)
-        return true
-    }
-
-    func hash(into hasher: inout Hasher) {
-        // Use a constant value for consistency with the null type code
-        hasher.combine(TupleTypeCode.null.rawValue)
-    }
-}
-
-extension String: TupleElement {
-    public func encodeTuple() -> FDB.Bytes {
         var encoded = [TupleTypeCode.string.rawValue]
         let utf8Bytes = Array(utf8)
 
@@ -208,7 +329,7 @@ extension String: TupleElement {
         return encoded
     }
 
-    public static func decodeTuple(from bytes: FDB.Bytes, at offset: inout Int) throws -> String {
+    static func decodeTuple(from bytes: FDB.Bytes, at offset: inout Int) throws -> String {
         var decoded = FDB.Bytes()
 
         while offset < bytes.count {
@@ -231,8 +352,23 @@ extension String: TupleElement {
     }
 }
 
-extension FDB.Bytes: TupleElement {
-    public func encodeTuple() -> FDB.Bytes {
+extension FDB.Bytes: TupleElementConvertible {
+    public func tupleElement() -> TupleElement {
+        .bytes(self)
+    }
+
+    public static func fromTuple(element: TupleElement?) -> FDB.Bytes? {
+        switch element {
+        case let .bytes(b):
+            return b
+        default:
+            return nil
+        }
+    }
+}
+
+extension FDB.Bytes: TupleCodable {
+    func encodeTuple() -> FDB.Bytes {
         var encoded = [TupleTypeCode.bytes.rawValue]
         for byte in self {
             if byte == 0x00 {
@@ -245,7 +381,7 @@ extension FDB.Bytes: TupleElement {
         return encoded
     }
 
-    public static func decodeTuple(from bytes: FDB.Bytes, at offset: inout Int) throws -> FDB.Bytes {
+    static func decodeTuple(from bytes: FDB.Bytes, at offset: inout Int) throws -> FDB.Bytes {
         var decoded = FDB.Bytes()
 
         while offset < bytes.count {
@@ -268,12 +404,27 @@ extension FDB.Bytes: TupleElement {
     }
 }
 
-extension Bool: TupleElement {
-    public func encodeTuple() -> FDB.Bytes {
+extension Bool: TupleElementConvertible {
+    public func tupleElement() -> TupleElement {
+        .bool(self)
+    }
+
+    public static func fromTuple(element: TupleElement?) -> Bool? {
+        switch element {
+        case let .bool(b):
+            return b
+        default:
+            return nil
+        }
+    }
+}
+
+extension Bool: TupleCodable {
+    func encodeTuple() -> FDB.Bytes {
         return self ? [TupleTypeCode.boolTrue.rawValue] : [TupleTypeCode.boolFalse.rawValue]
     }
 
-    public static func decodeTuple(from bytes: FDB.Bytes, at offset: inout Int) throws -> Bool {
+    static func decodeTuple(from bytes: FDB.Bytes, at offset: inout Int) throws -> Bool {
         guard offset > 0 else {
             throw TupleError.invalidDecoding("Bool decoding requires type code")
         }
@@ -290,8 +441,23 @@ extension Bool: TupleElement {
     }
 }
 
-extension Float: TupleElement {
-    public func encodeTuple() -> FDB.Bytes {
+extension Float: TupleElementConvertible {
+    public func tupleElement() -> TupleElement {
+        .float(self)
+    }
+
+    public static func fromTuple(element: TupleElement?) -> Float? {
+        switch element {
+        case let .float(f):
+            return f
+        default:
+            return nil
+        }
+    }
+}
+
+extension Float: TupleCodable {
+    func encodeTuple() -> FDB.Bytes {
         var encoded = [TupleTypeCode.float.rawValue]
         let bitPattern = self.bitPattern
         let bytes = withUnsafeBytes(of: bitPattern.bigEndian) { Array($0) }
@@ -299,7 +465,7 @@ extension Float: TupleElement {
         return encoded
     }
 
-    public static func decodeTuple(from bytes: FDB.Bytes, at offset: inout Int) throws -> Float {
+    static func decodeTuple(from bytes: FDB.Bytes, at offset: inout Int) throws -> Float {
         guard offset + 4 <= bytes.count else {
             throw TupleError.invalidDecoding("Not enough bytes for Float")
         }
@@ -315,8 +481,23 @@ extension Float: TupleElement {
     }
 }
 
-extension Double: TupleElement {
-    public func encodeTuple() -> FDB.Bytes {
+extension Double: TupleElementConvertible {
+    public func tupleElement() -> TupleElement {
+        .double(self)
+    }
+
+    public static func fromTuple(element: TupleElement?) -> Double? {
+        switch element {
+        case let .double(d):
+            return d
+        default:
+            return nil
+        }
+    }
+}
+
+extension Double: TupleCodable {
+    func encodeTuple() -> FDB.Bytes {
         var encoded = [TupleTypeCode.double.rawValue]
         let bitPattern = self.bitPattern
         let bytes = withUnsafeBytes(of: bitPattern.bigEndian) { Array($0) }
@@ -324,7 +505,7 @@ extension Double: TupleElement {
         return encoded
     }
 
-    public static func decodeTuple(from bytes: FDB.Bytes, at offset: inout Int) throws -> Double {
+    static func decodeTuple(from bytes: FDB.Bytes, at offset: inout Int) throws -> Double {
         guard offset + 8 <= bytes.count else {
             throw TupleError.invalidDecoding("Not enough bytes for Double")
         }
@@ -340,8 +521,23 @@ extension Double: TupleElement {
     }
 }
 
-extension UUID: TupleElement {
-    public func encodeTuple() -> FDB.Bytes {
+extension UUID: TupleElementConvertible {
+    public func tupleElement() -> TupleElement {
+        .uuid(self)
+    }
+
+    public static func fromTuple(element: TupleElement?) -> UUID? {
+        switch element {
+        case let .uuid(u):
+            return u
+        default:
+            return nil
+        }
+    }
+}
+
+extension UUID: TupleCodable {
+    func encodeTuple() -> FDB.Bytes {
         var encoded = [TupleTypeCode.uuid.rawValue]
         let (u1, u2, u3, u4, u5, u6, u7, u8, u9, u10, u11, u12, u13, u14, u15, u16) = uuid
         encoded.append(contentsOf: [
@@ -350,7 +546,7 @@ extension UUID: TupleElement {
         return encoded
     }
 
-    public static func decodeTuple(from bytes: FDB.Bytes, at offset: inout Int) throws -> UUID {
+    static func decodeTuple(from bytes: FDB.Bytes, at offset: inout Int) throws -> UUID {
         guard offset + 16 <= bytes.count else {
             throw TupleError.invalidDecoding("Not enough bytes for UUID")
         }
@@ -389,9 +585,24 @@ private func bisectLeft(_ value: UInt64) -> Int {
     return n
 }
 
-extension Int64: TupleElement {
-    public func encodeTuple() -> FDB.Bytes {
-        return encodeInt(self)
+extension Int64: TupleElementConvertible {
+    public func tupleElement() -> TupleElement {
+        .int(self)
+    }
+
+    public static func fromTuple(element: TupleElement?) -> Int64? {
+        switch element {
+        case let .int(i):
+            return i
+        default:
+            return nil
+        }
+    }
+}
+
+extension Int64: TupleCodable {
+    func encodeTuple() -> FDB.Bytes {
+        encodeInt(self)
     }
 
     private func encodeInt(_ value: Int64) -> FDB.Bytes {
@@ -427,7 +638,7 @@ extension Int64: TupleElement {
         return encoded
     }
 
-    public static func decodeTuple(from bytes: FDB.Bytes, at offset: inout Int) throws -> Int64 {
+    static func decodeTuple(from bytes: FDB.Bytes, at offset: inout Int) throws -> Int64 {
         guard offset > 0 else {
             throw TupleError.invalidDecoding("Int64 decoding requires type code")
         }
@@ -469,11 +680,26 @@ extension Int64: TupleElement {
     }
 }
 
-extension Tuple: TupleElement {
-    public func encodeTuple() -> FDB.Bytes {
+extension Tuple: TupleElementConvertible {
+    public func tupleElement() -> TupleElement {
+        .nested(self)
+    }
+
+    public static func fromTuple(element: TupleElement?) -> Tuple? {
+        switch element {
+        case let .nested(t):
+            return t
+        default:
+            return nil
+        }
+    }
+}
+
+extension Tuple: TupleCodable {
+    func encodeTuple() -> FDB.Bytes {
         var encoded = [TupleTypeCode.nested.rawValue]
         for element in elements {
-            let elementBytes = element.encodeTuple()
+            let elementBytes = element.encode()
             for byte in elementBytes {
                 if byte == 0x00 {
                     encoded.append(contentsOf: [0x00, 0xFF])
@@ -486,7 +712,7 @@ extension Tuple: TupleElement {
         return encoded
     }
 
-    public static func decodeTuple(from bytes: FDB.Bytes, at offset: inout Int) throws -> Tuple {
+    static func decodeTuple(from bytes: FDB.Bytes, at offset: inout Int) throws -> Tuple {
         var nestedBytes = FDB.Bytes()
 
         while offset < bytes.count {
@@ -505,54 +731,36 @@ extension Tuple: TupleElement {
             }
         }
 
-        let nestedElements = try Tuple.decode(from: nestedBytes)
-        return Tuple(nestedElements)
+        return try Tuple.decode(from: nestedBytes)
     }
 }
 
-extension Int: TupleElement {
-    public func encodeTuple() -> FDB.Bytes {
-        return Int64(self).encodeTuple()
+extension Int: TupleElementConvertible {
+    public func tupleElement() -> TupleElement {
+        .int(Int64(self))
     }
 
-    public static func decodeTuple(from bytes: FDB.Bytes, at offset: inout Int) throws -> Int {
-        let value = try Int64.decodeTuple(from: bytes, at: &offset)
-        guard value >= Int.min && value <= Int.max else {
-            throw TupleError.invalidDecoding("Int64 value \(value) out of range for Int")
+    public static func fromTuple(element: TupleElement?) -> Int? {
+        switch element {
+        case let .int(i):
+            return Int(i)
+        default:
+            return nil
         }
-        return Int(value)
     }
 }
 
-extension Int32: TupleElement {
-    public func encodeTuple() -> FDB.Bytes {
-        return Int64(self).encodeTuple()
+extension Int32: TupleElementConvertible {
+    public func tupleElement() -> TupleElement {
+        .int(Int64(self))
     }
 
-    public static func decodeTuple(from bytes: FDB.Bytes, at offset: inout Int) throws -> Int32 {
-        let value = try Int64.decodeTuple(from: bytes, at: &offset)
-        guard value >= Int32.min && value <= Int32.max else {
-            throw TupleError.invalidDecoding("Int64 value \(value) out of range for Int32")
+    public static func fromTuple(element: TupleElement?) -> Int32? {
+        switch element {
+        case let .int(i):
+            return Int32(i)
+        default:
+            return nil
         }
-        return Int32(value)
-    }
-}
-
-extension UInt64: TupleElement {
-    public func encodeTuple() -> FDB.Bytes {
-        if self <= Int64.max {
-            return Int64(self).encodeTuple()
-        } else {
-            return Int64.max.encodeTuple()
-        }
-    }
-
-    public static func decodeTuple(from bytes: FDB.Bytes, at offset: inout Int) throws -> UInt64 {
-        let value = try Int64.decodeTuple(from: bytes, at: &offset)
-        guard value >= 0 else {
-            throw TupleError.invalidDecoding(
-                "Negative value \(value) cannot be converted to UInt64")
-        }
-        return UInt64(value)
     }
 }
