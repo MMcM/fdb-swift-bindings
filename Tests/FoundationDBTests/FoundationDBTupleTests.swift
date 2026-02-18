@@ -507,3 +507,14 @@ func tupleNilPositions() throws {
 
     #expect(tuple1 != tuple2, "Tuples with nils in different positions should be unequal")
 }
+
+@Test("Tuple to Swift Tuple")
+func tupleToTuple() throws {
+    let tuple = Tuple("hello", 2, "foo")
+
+    let encoded = tuple.encode()
+    let (decodedString1, decodedInt, decodedString2) = try decodeTuple<String, Int, String>(from: encoded)
+    #expect(decodedString1 == "hello")
+    #expect(decodedInt == 2)
+    #expect(decodedString2 == "foo")
+}

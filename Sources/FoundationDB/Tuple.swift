@@ -191,7 +191,6 @@ protocol TupleCodable {
     static func decodeTuple(from bytes: FDB.Bytes, at offset: inout Int) throws -> Self
 }
 
-// TODO: Make a TypedTuple so that we don't have to typecast manually.
 /// A tuple represents an ordered collection of elements that can be encoded to and decoded from bytes.
 ///
 /// Tuples can be used as keys in FoundationDB, and their encoding preserves lexicographic ordering.
@@ -763,4 +762,21 @@ extension Int32: TupleElementConvertible {
             return nil
         }
     }
+}
+
+// TODO: Make a TypedTuple so that we don't have to typecast manually.
+
+public func decodeTuple<each T: TupleElementConvertible>(from bytes: FDB.Bytes) throws -> (repeat each T) {
+    let t = try Tuple.decode(from: bytes)
+    var i = 0
+    func _next() -> TupleElement? {
+        let e = t[i]
+        i += 1
+        return e
+    }
+    let st = (repeat (each T).fromTuple(element: _next())!)
+    if i != t.count {
+        throw TupleError.invalidDecoding("Left over tuple elements")
+    }
+    return st
 }
