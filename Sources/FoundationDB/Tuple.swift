@@ -71,6 +71,7 @@ public enum TupleElement: Sendable, Hashable, Equatable, Comparable {
     case double(Double)
     case bool(Bool)
     case uuid(UUID)
+    case versionstamp(Versionstamp)
 
     func encode() -> FDB.Bytes {
         switch self {
@@ -92,6 +93,8 @@ public enum TupleElement: Sendable, Hashable, Equatable, Comparable {
             return b.encodeTuple()
         case let .uuid(u):
             return u.encodeTuple()
+        case let .versionstamp(v):
+            return v.encodeTuple()
         }
     }
 
@@ -160,6 +163,13 @@ public enum TupleElement: Sendable, Hashable, Equatable, Comparable {
             default:
                 return false
             }
+        case let .versionstamp(vl):
+            switch rhs {
+            case let .versionstamp(vr):
+                return vl == vr
+            default:
+                return false
+            }
         }
     }
 
@@ -168,7 +178,7 @@ public enum TupleElement: Sendable, Hashable, Equatable, Comparable {
     }
 }
 
-// public protocol for converting between Swift native types and Tuple element types.
+/// public protocol for converting between Swift native types and Tuple element types.
 public protocol TupleElementConvertible {
     func tupleElement() -> TupleElement
 
@@ -185,7 +195,7 @@ extension TupleElement: TupleElementConvertible {
     }
 }
 
-// internal protocol for converting between Tuple elements and byte strings.
+/// internal protocol for converting between Tuple elements and byte strings.
 protocol TupleCodable {
     func encodeTuple() -> FDB.Bytes
     static func decodeTuple(from bytes: FDB.Bytes, at offset: inout Int) throws -> Self
@@ -259,6 +269,9 @@ public struct Tuple: Sendable, Hashable, Equatable, Comparable, CustomStringConv
                 elements.append(element.tupleElement())
             case TupleTypeCode.uuid.rawValue:
                 let element = try UUID.decodeTuple(from: bytes, at: &offset)
+                elements.append(element.tupleElement())
+            case TupleTypeCode.versionstamp.rawValue:
+                let element = try Versionstamp.decodeTuple(from: bytes, at: &offset)
                 elements.append(element.tupleElement())
             case TupleTypeCode.intZero.rawValue:
                 elements.append(TupleElement.int(0))
@@ -564,6 +577,40 @@ extension UUID: TupleCodable {
     }
 }
 
+extension Versionstamp: TupleElementConvertible {
+    public func tupleElement() -> TupleElement {
+        .versionstamp(self)
+    }
+
+    public static func fromTuple(element: TupleElement?) -> Versionstamp? {
+        switch element {
+        case let .versionstamp(v):
+            return v
+        default:
+            return nil
+        }
+    }
+}
+
+extension Versionstamp: TupleCodable {
+    public func encodeTuple() -> FDB.Bytes {
+        var bytes: FDB.Bytes = [TupleTypeCode.versionstamp.rawValue]
+        bytes.append(contentsOf: toBytes())
+        return bytes
+    }
+
+    public static func decodeTuple(from bytes: FDB.Bytes, at offset: inout Int) throws -> Versionstamp {
+        guard offset + Versionstamp.totalSize <= bytes.count else {
+            throw TupleError.invalidEncoding
+        }
+
+        let versionstampBytes = Array(bytes[offset..<(offset + Versionstamp.totalSize)])
+        offset += Versionstamp.totalSize
+
+        return try Versionstamp.fromBytes(versionstampBytes)
+    }
+}
+
 private let sizeLimits: [UInt64] = [
     (1 << (0 * 8)) - 1,
     (1 << (1 * 8)) - 1,
@@ -760,6 +807,119 @@ extension Int32: TupleElementConvertible {
             return Int32(i)
         default:
             return nil
+        }
+    }
+}
+
+extension Tuple {
+
+    /// Pack tuple with an incomplete versionstamp and append offset
+    ///
+    /// This method packs a tuple that contains exactly one incomplete versionstamp,
+    /// and appends the byte offset where the versionstamp appears.
+    ///
+    /// The offset is always 4 bytes (uint32, little-endian) as per API version 520+.
+    /// API versions prior to 520 used 2-byte offsets but are no longer supported.
+    ///
+    /// The resulting key can be used with `SET_VERSIONSTAMPED_KEY` atomic operation.
+    /// At commit time, FoundationDB will replace the 10-byte placeholder with the
+    /// actual transaction versionstamp.
+    ///
+    /// - Parameter prefix: Optional prefix bytes to prepend (default: empty)
+    /// - Returns: Packed bytes with offset appended
+    /// - Throws: `TupleError.invalidEncoding` if:
+    ///   - No incomplete versionstamp found
+    ///   - Multiple incomplete versionstamps found
+    ///   - Offset exceeds maximum value (65535 for API < 520, 4294967295 for API >= 520)
+    ///
+    /// Example usage:
+    /// ```swift
+    /// let vs = Versionstamp.incomplete(userVersion: 0)
+    /// let tuple = Tuple("user", 12345, vs)
+    /// let key = try tuple.encodeWithVersionstamp()
+    ///
+    /// transaction.atomicOp(
+    ///     key: key,
+    ///     param: [],
+    ///     mutationType: .setVersionstampedKey
+    /// )
+    /// ```
+    public func encodeWithVersionstamp(prefix: FDB.Bytes = []) throws -> FDB.Bytes {
+        var packed = prefix
+        var versionstampPosition: Int? = nil
+        var incompleteCount = 0
+
+        // Encode each element and track incomplete versionstamp position
+        for element in elements {
+            switch element {
+            case let .versionstamp(vs):
+                if !vs.isComplete {
+                    incompleteCount += 1
+                    if versionstampPosition == nil {
+                        // Position points to start of 10-byte transaction version
+                        // (after type code byte and before the 10-byte placeholder)
+                        versionstampPosition = packed.count + 1  // +1 for type code (0x33)
+                    }
+                }
+            default:
+                break
+            }
+            packed.append(contentsOf: element.encode())
+        }
+
+        // Validate exactly one incomplete versionstamp
+        guard incompleteCount == 1, let position = versionstampPosition else {
+            throw TupleError.invalidEncoding
+        }
+
+        // Append offset based on API version
+        // Currently defaults to API 520+ behavior (4-byte offset)
+        // API < 520 used 2-byte offset, but is no longer supported
+
+        // API >= 520: Use 4-byte offset (uint32, little-endian)
+        guard position <= UInt32.max else {
+            throw TupleError.invalidEncoding
+        }
+
+        let offset = UInt32(position)
+        withUnsafeBytes(of: offset.littleEndian) { packed.append(contentsOf: $0) }
+
+        return packed
+    }
+
+    /// Check if tuple contains an incomplete versionstamp
+    /// - Returns: true if any element is an incomplete versionstamp
+    public func hasIncompleteVersionstamp() -> Bool {
+        return elements.contains { element in
+            switch element {
+            case let .versionstamp(vs):
+                return !vs.isComplete
+            default:
+                return false
+            }
+        }
+    }
+
+    /// Count incomplete versionstamps in tuple
+    /// - Returns: Number of incomplete versionstamps
+    public func countIncompleteVersionstamps() -> Int {
+        return elements.count { element in
+            switch element {
+            case let .versionstamp(vs):
+                return !vs.isComplete
+            default:
+                return false
+            }
+        }
+    }
+
+    /// Validate tuple for use with encodeWithVersionstamp()
+    /// - Throws: `TupleError.invalidEncoding` if validation fails
+    public func validateForVersionstamp() throws {
+        let incompleteCount = countIncompleteVersionstamps()
+
+        if incompleteCount != 1 {
+            throw TupleError.invalidEncoding
         }
     }
 }
