@@ -182,6 +182,7 @@ public enum TupleElement: Sendable, Hashable, Equatable, Comparable {
 public protocol TupleElementConvertible {
     func tupleElement() -> TupleElement
 
+    // TODO: This could instead be init?, I think. Is that better?
     static func fromTuple(element: TupleElement?) -> Self?
 }
 
@@ -307,6 +308,20 @@ public struct Tuple: Sendable, Hashable, Equatable, Comparable, CustomStringConv
 
     public var description: String {
         elements.description
+    }
+}
+
+extension TupleElement {
+    public func convert<T: TupleElementConvertible>(_: T.Type) -> T? {
+        T.fromTuple(element: self)
+    }
+}
+
+extension Tuple {
+    // TODO: Is this worth having?
+    public subscript<T: TupleElementConvertible>(index: Int, as type: T.Type) -> T? {
+        guard index >= 0, index < elements.count else { return nil }
+        return elements[index].convert(type)
     }
 }
 
@@ -926,17 +941,37 @@ extension Tuple {
 
 // TODO: Make a TypedTuple so that we don't have to typecast manually.
 
-public func decodeTuple<each T: TupleElementConvertible>(from bytes: FDB.Bytes) throws -> (repeat each T) {
-    let t = try Tuple.decode(from: bytes)
-    var i = 0
-    func _next() -> TupleElement? {
-        let e = t[i]
-        i += 1
-        return e
+extension Tuple {
+    init<each T: TupleElementConvertible>(_ elements: (repeat each T)) {
+        var tupleElements: [TupleElement] = []
+        for e in repeat each elements {
+            tupleElements.append(e.tupleElement())
+        }
+        self.init(tupleElements)
     }
-    let st = (repeat (each T).fromTuple(element: _next())!)
-    if i != t.count {
-        throw TupleError.invalidDecoding("Left over tuple elements")
+
+    public static func encode<each T: TupleElementConvertible>(_ elements: (repeat each T)) -> FDB.Bytes {
+        // TODO: The DRY version of this that uses the above crashes the compiler.
+        var tupleElements: [TupleElement] = []
+        for e in repeat each elements {
+            tupleElements.append(e.tupleElement())
+        }
+        return Tuple(tupleElements).encode()
     }
-    return st
+
+    public func convert<each T: TupleElementConvertible>(_ type:(repeat each T).Type) -> (repeat each T) {
+        var i = 0
+        func _next() -> TupleElement? {
+            let e = self[i]
+            i += 1
+            return e
+        }
+        let st = (repeat (each T).fromTuple(element: _next())!)
+        return st
+    }
+
+    public static func decode<each T: TupleElementConvertible>(from bytes: FDB.Bytes, as type:(repeat each T).Type = (repeat each T).self) throws -> (repeat each T) {
+        let t = try Tuple.decode(from: bytes)
+        return t.convert(type)
+    }
 }

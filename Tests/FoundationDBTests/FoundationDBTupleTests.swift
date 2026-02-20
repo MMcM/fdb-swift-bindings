@@ -262,13 +262,13 @@ func tupleWithZero() throws {
     let decoded = try Tuple.decode(from: encoded)
 
     #expect(decoded.count == 3, "Should have 3 elements")
-    let decodedString1 = String.fromTuple(element: decoded[0])
+    let decodedString1 = decoded[0]?.convert(String.self)
     #expect(decodedString1 == "hello")
 
-    let decodedInt = Int64.fromTuple(element: decoded[1])
+    let decodedInt = decoded[1]?.convert(Int64.self)
     #expect(decodedInt == 0)
 
-    let decodedString2 = String.fromTuple(element: decoded[2])
+    let decodedString2 = decoded[2, as:String.self]
     #expect(decodedString2 == "foo")
 }
 
@@ -510,11 +510,27 @@ func tupleNilPositions() throws {
 
 @Test("Tuple to Swift Tuple")
 func tupleToTuple() throws {
-    let tuple = Tuple("hello", 2, "foo")
+    typealias TupleType = (String, Int, String)
+
+    let swiftTuple: TupleType = ("hello", 2, "foo")
+    let tuple = Tuple(swiftTuple)
 
     let encoded = tuple.encode()
-    let (decodedString1, decodedInt, decodedString2) = try decodeTuple<String, Int, String>(from: encoded)
-    #expect(decodedString1 == "hello")
-    #expect(decodedInt == 2)
-    #expect(decodedString2 == "foo")
+    let decodedTuple = try Tuple.decode(from: encoded, as: TupleType.self)
+    #expect(decodedTuple == swiftTuple)
+
+    let decodedTuple1a = try Tuple.decode(from: encoded, as: (String, Int, String).self)
+    #expect(decodedTuple == decodedTuple1a)
+
+    let encoded2 = Tuple.encode(swiftTuple)
+    #expect(encoded == encoded2)
+
+    let decodedTuple2: TupleType = try Tuple.decode(from: encoded)
+    #expect(decodedTuple == decodedTuple2)
+
+    let decodedTuple2a: (String, Int, String) = try Tuple.decode(from: encoded)
+    #expect(decodedTuple2 == decodedTuple2a)
+
+    let (s1, i2, s3) = try Tuple.decode<String, Int, String>(from: encoded)
+    #expect(decodedTuple == (s1, i2, s3))
 }
