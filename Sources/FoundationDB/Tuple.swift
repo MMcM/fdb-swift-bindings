@@ -213,7 +213,7 @@ public struct Tuple: Sendable, Hashable, Equatable, Comparable, CustomStringConv
         self.elements = elements
     }
 
-    public init(_ elements: [TupleElementConvertible]) {
+    public init(_ elements: any Sequence<TupleElementConvertible>) {
         self.init(elements.map { $0.tupleElement() })
     }
 
