@@ -73,28 +73,53 @@ public enum TupleElement: Sendable, Hashable, Equatable, Comparable {
     case uuid(UUID)
     case versionstamp(Versionstamp)
 
-    func encode() -> FDB.Bytes {
+    var encodedCount: Int {
         switch self {
         case .null:
-            return [TupleTypeCode.null.rawValue]
+            return 1
         case let .bytes(b):
-            return b.encodeTuple()
+            return b.encodedTupleCount
         case let .string(s):
-            return s.encodeTuple()
+            return s.encodedTupleCount
         case let .nested(t):
-            return t.encodeTuple()
+            return t.encodedTupleCount
         case let .int(i):
-            return i.encodeTuple()
+            return i.encodedTupleCount
         case let .float(f):
-            return f.encodeTuple()
+            return f.encodedTupleCount
         case let .double(d):
-            return d.encodeTuple()
+            return d.encodedTupleCount
         case let .bool(b):
-            return b.encodeTuple()
+            return b.encodedTupleCount
         case let .uuid(u):
-            return u.encodeTuple()
+            return u.encodedTupleCount
         case let .versionstamp(v):
-            return v.encodeTuple()
+            return v.encodedTupleCount
+        }
+    }
+
+    func encode(into encoded: inout FDB.Bytes) {
+        switch self {
+        case .null:
+            encoded.append(TupleTypeCode.null.rawValue)
+        case let .bytes(b):
+            b.encodeTuple(into: &encoded)
+        case let .string(s):
+            s.encodeTuple(into: &encoded)
+        case let .nested(t):
+            t.encodeTuple(into: &encoded)
+        case let .int(i):
+            i.encodeTuple(into: &encoded)
+        case let .float(f):
+            f.encodeTuple(into: &encoded)
+        case let .double(d):
+            d.encodeTuple(into: &encoded)
+        case let .bool(b):
+            b.encodeTuple(into: &encoded)
+        case let .uuid(u):
+            u.encodeTuple(into: &encoded)
+        case let .versionstamp(v):
+            v.encodeTuple(into: &encoded)
         }
     }
 
@@ -174,7 +199,11 @@ public enum TupleElement: Sendable, Hashable, Equatable, Comparable {
     }
 
     public static func < (lhs: TupleElement, rhs: TupleElement) -> Bool {
-        lhs.encode().lexicographicallyPrecedes(rhs.encode())
+        var le = FDB.Bytes()
+        lhs.encode(into: &le)
+        var re = FDB.Bytes()
+        rhs.encode(into: &re)
+        return le.lexicographicallyPrecedes(re)
     }
 }
 
@@ -198,8 +227,9 @@ extension TupleElement: TupleElementConvertible {
 
 /// internal protocol for converting between Tuple elements and byte strings.
 protocol TupleCodable {
-    func encodeTuple() -> FDB.Bytes
-    static func decodeTuple(from bytes: FDB.Bytes, at offset: inout Int) throws -> Self
+    var encodedTupleCount: Int { get }
+    func encodeTuple(into: inout FDB.Bytes)
+    static func decodeTuple(from: FDB.Bytes, at: inout Int) throws -> Self
 }
 
 /// A tuple represents an ordered collection of elements that can be encoded to and decoded from bytes.
@@ -230,21 +260,43 @@ public struct Tuple: Sendable, Hashable, Equatable, Comparable, CustomStringConv
         return elements[index]
     }
 
-    public func encode() -> FDB.Bytes {
-        var result = FDB.Bytes()
+    public var encodedCount: Int {
+        var result = 0
         for element in elements {
-            result.append(contentsOf: element.encode())
+            result += element.encodedCount
         }
         return result
     }
 
-    public static func decode(from bytes: FDB.Bytes) throws -> Self {
-        var elements: [TupleElement] = []
+    public func encode() -> FDB.Bytes {
+        let count = encodedCount
+        var encoded = FDB.Bytes()
+        encoded.reserveCapacity(count)
+        for element in elements {
+            element.encode(into: &encoded)
+        }
+        return encoded
+    }
+
+    public static func decode(from: FDB.Bytes) throws -> Self {
         var offset = 0
+        return try decode(from: from, at: &offset, nested: false)
+    }
+
+    static func decode(from bytes: FDB.Bytes, at offset: inout Int, nested: Bool) throws -> Self {
+        var elements: [TupleElement] = []
 
         while offset < bytes.count {
             let typeCode = bytes[offset]
             offset += 1
+
+            if nested && typeCode == 0 {
+                if offset < bytes.count && bytes[offset] == 0xFF {
+                    offset += 1
+                } else {
+                    break
+                }
+            }
 
             switch typeCode {
             case TupleTypeCode.null.rawValue:
@@ -337,8 +389,12 @@ extension String: TupleElementConvertible {
 }
 
 extension String: TupleCodable {
-    func encodeTuple() -> FDB.Bytes {
-        var encoded = [TupleTypeCode.string.rawValue]
+    var encodedTupleCount: Int {
+        utf8.count + utf8.count { $0 == 0 } + 2
+    }
+
+    func encodeTuple(into encoded: inout FDB.Bytes) {
+        encoded.append(TupleTypeCode.string.rawValue)
         let utf8Bytes = Array(utf8)
 
         for byte in utf8Bytes {
@@ -349,7 +405,6 @@ extension String: TupleCodable {
             }
         }
         encoded.append(0x00)
-        return encoded
     }
 
     static func decodeTuple(from bytes: FDB.Bytes, at offset: inout Int) throws -> String {
@@ -391,8 +446,12 @@ extension FDB.Bytes: TupleElementConvertible {
 }
 
 extension FDB.Bytes: TupleCodable {
-    func encodeTuple() -> FDB.Bytes {
-        var encoded = [TupleTypeCode.bytes.rawValue]
+    var encodedTupleCount: Int {
+        self.count + self.count { $0 == 0 } + 2
+    }
+
+    func encodeTuple(into encoded: inout FDB.Bytes) {
+        encoded.append(TupleTypeCode.bytes.rawValue)
         for byte in self {
             if byte == 0x00 {
                 encoded.append(contentsOf: [0x00, 0xFF])
@@ -401,7 +460,6 @@ extension FDB.Bytes: TupleCodable {
             }
         }
         encoded.append(0x00)
-        return encoded
     }
 
     static func decodeTuple(from bytes: FDB.Bytes, at offset: inout Int) throws -> FDB.Bytes {
@@ -443,8 +501,12 @@ extension Bool: TupleElementConvertible {
 }
 
 extension Bool: TupleCodable {
-    func encodeTuple() -> FDB.Bytes {
-        return self ? [TupleTypeCode.boolTrue.rawValue] : [TupleTypeCode.boolFalse.rawValue]
+    var encodedTupleCount: Int {
+        2
+    }
+
+    func encodeTuple(into encoded: inout FDB.Bytes) {
+        encoded.append(self ? TupleTypeCode.boolTrue.rawValue : TupleTypeCode.boolFalse.rawValue)
     }
 
     static func decodeTuple(from bytes: FDB.Bytes, at offset: inout Int) throws -> Bool {
@@ -480,12 +542,15 @@ extension Float: TupleElementConvertible {
 }
 
 extension Float: TupleCodable {
-    func encodeTuple() -> FDB.Bytes {
-        var encoded = [TupleTypeCode.float.rawValue]
+    var encodedTupleCount: Int {
+        5
+    }
+
+    func encodeTuple(into encoded: inout FDB.Bytes) {
+        encoded.append(TupleTypeCode.float.rawValue)
         let bitPattern = self.bitPattern
         let bytes = withUnsafeBytes(of: bitPattern.bigEndian) { Array($0) }
         encoded.append(contentsOf: bytes)
-        return encoded
     }
 
     static func decodeTuple(from bytes: FDB.Bytes, at offset: inout Int) throws -> Float {
@@ -520,12 +585,15 @@ extension Double: TupleElementConvertible {
 }
 
 extension Double: TupleCodable {
-    func encodeTuple() -> FDB.Bytes {
-        var encoded = [TupleTypeCode.double.rawValue]
+    var encodedTupleCount: Int {
+        9
+    }
+
+    func encodeTuple(into encoded: inout FDB.Bytes) {
+        encoded.append(TupleTypeCode.double.rawValue)
         let bitPattern = self.bitPattern
         let bytes = withUnsafeBytes(of: bitPattern.bigEndian) { Array($0) }
         encoded.append(contentsOf: bytes)
-        return encoded
     }
 
     static func decodeTuple(from bytes: FDB.Bytes, at offset: inout Int) throws -> Double {
@@ -560,13 +628,16 @@ extension UUID: TupleElementConvertible {
 }
 
 extension UUID: TupleCodable {
-    func encodeTuple() -> FDB.Bytes {
-        var encoded = [TupleTypeCode.uuid.rawValue]
+    var encodedTupleCount: Int {
+        17
+    }
+
+    func encodeTuple(into encoded: inout FDB.Bytes) {
+        encoded.append(TupleTypeCode.uuid.rawValue)
         let (u1, u2, u3, u4, u5, u6, u7, u8, u9, u10, u11, u12, u13, u14, u15, u16) = uuid
         encoded.append(contentsOf: [
             u1, u2, u3, u4, u5, u6, u7, u8, u9, u10, u11, u12, u13, u14, u15, u16,
         ])
-        return encoded
     }
 
     static func decodeTuple(from bytes: FDB.Bytes, at offset: inout Int) throws -> UUID {
@@ -604,10 +675,13 @@ extension Versionstamp: TupleElementConvertible {
 }
 
 extension Versionstamp: TupleCodable {
-    public func encodeTuple() -> FDB.Bytes {
-        var bytes: FDB.Bytes = [TupleTypeCode.versionstamp.rawValue]
-        bytes.append(contentsOf: toBytes())
-        return bytes
+    var  encodedTupleCount: Int {
+        Versionstamp.totalSize
+    }
+
+    func encodeTuple(into encoded: inout FDB.Bytes) {
+        encoded.append(TupleTypeCode.versionstamp.rawValue)
+        encoded.append(contentsOf: toBytes())
     }
 
     public static func decodeTuple(from bytes: FDB.Bytes, at offset: inout Int) throws -> Versionstamp {
@@ -658,41 +732,40 @@ extension Int64: TupleElementConvertible {
 }
 
 extension Int64: TupleCodable {
-    func encodeTuple() -> FDB.Bytes {
-        encodeInt(self)
+    var encodedTupleCount: Int {
+        if self == 0 {
+            return 2
+        } else {
+            return bisectLeft(UInt64((self < 0) ? -self : self)) + 1
+        }
     }
 
-    private func encodeInt(_ value: Int64) -> FDB.Bytes {
-        if value == 0 {
-            return [TupleTypeCode.intZero.rawValue]
-        }
-
-        var encoded = FDB.Bytes()
-        if value > 0 {
-            let n = bisectLeft(UInt64(value))
+    func encodeTuple(into encoded: inout FDB.Bytes) {
+        if self == 0 {
+            encoded.append(TupleTypeCode.intZero.rawValue)
+        } else if self > 0 {
+            let n = bisectLeft(UInt64(self))
             encoded.append(TupleTypeCode.intZero.rawValue + UInt8(n))
-            let bigEndianValue = UInt64(bitPattern: value).bigEndian
+            let bigEndianValue = UInt64(bitPattern: self).bigEndian
             let bytes = withUnsafeBytes(of: bigEndianValue) { Array($0) }
             encoded.append(contentsOf: bytes.suffix(n))
         } else {
-            let n = bisectLeft(UInt64(-value))
+            let n = bisectLeft(UInt64(-self))
             encoded.append(TupleTypeCode.intZero.rawValue - UInt8(n))
 
             if n < 8 {
-                let offset = UInt64(sizeLimits[n]) &+ UInt64(bitPattern: value)
+                let offset = UInt64(sizeLimits[n]) &+ UInt64(bitPattern: self)
                 let bigEndianValue = offset.bigEndian
                 let bytes = withUnsafeBytes(of: bigEndianValue) { Array($0) }
                 encoded.append(contentsOf: bytes.suffix(n))
             } else {
                 // n == 8 case
-                let offset = UInt64(bitPattern: value)
+                let offset = UInt64(bitPattern: self)
                 let bigEndianValue = offset.bigEndian
                 let bytes = withUnsafeBytes(of: bigEndianValue) { Array($0) }
                 encoded.append(contentsOf: bytes)
             }
         }
-
-        return encoded
     }
 
     static func decodeTuple(from bytes: FDB.Bytes, at offset: inout Int) throws -> Int64 {
@@ -753,42 +826,34 @@ extension Tuple: TupleElementConvertible {
 }
 
 extension Tuple: TupleCodable {
-    func encodeTuple() -> FDB.Bytes {
-        var encoded = [TupleTypeCode.nested.rawValue]
+    var encodedTupleCount: Int {
+        var result = 2
         for element in elements {
-            let elementBytes = element.encode()
-            for byte in elementBytes {
-                if byte == 0x00 {
-                    encoded.append(contentsOf: [0x00, 0xFF])
-                } else {
-                    encoded.append(byte)
-                }
+            switch element {
+            case .null:
+                result += 2
+            default:
+                result += element.encodedCount
+            }
+        }
+        return result
+    }
+
+    func encodeTuple(into encoded: inout FDB.Bytes) {
+        encoded.append(TupleTypeCode.nested.rawValue)
+        for element in elements {
+            switch element {
+            case .null:
+                encoded.append(contentsOf: [0x00, 0xFF])
+            default:
+                element.encode(into: &encoded)
             }
         }
         encoded.append(0x00)
-        return encoded
     }
 
     static func decodeTuple(from bytes: FDB.Bytes, at offset: inout Int) throws -> Tuple {
-        var nestedBytes = FDB.Bytes()
-
-        while offset < bytes.count {
-            let byte = bytes[offset]
-            offset += 1
-
-            if byte == 0x00 {
-                if offset < bytes.count && bytes[offset] == 0xFF {
-                    offset += 1
-                    nestedBytes.append(0x00)
-                } else {
-                    break
-                }
-            } else {
-                nestedBytes.append(byte)
-            }
-        }
-
-        return try Tuple.decode(from: nestedBytes)
+        return try decode(from: bytes, at: &offset, nested: true)
     }
 }
 
@@ -856,7 +921,10 @@ extension Tuple {
     /// )
     /// ```
     public func encodeWithVersionstamp(prefix: FDB.Bytes = []) throws -> FDB.Bytes {
-        var packed = prefix
+        var encoded = FDB.Bytes()
+        encoded.reserveCapacity(prefix.count + encodedCount + 4)
+        encoded.append(contentsOf: prefix)
+
         var versionstampPosition: Int? = nil
         var incompleteCount = 0
 
@@ -869,13 +937,13 @@ extension Tuple {
                     if versionstampPosition == nil {
                         // Position points to start of 10-byte transaction version
                         // (after type code byte and before the 10-byte placeholder)
-                        versionstampPosition = packed.count + 1  // +1 for type code (0x33)
+                        versionstampPosition = encoded.count + 1  // +1 for type code (0x33)
                     }
                 }
             default:
                 break
             }
-            packed.append(contentsOf: element.encode())
+            element.encode(into: &encoded)
         }
 
         // Validate exactly one incomplete versionstamp
@@ -893,9 +961,9 @@ extension Tuple {
         }
 
         let offset = UInt32(position)
-        withUnsafeBytes(of: offset.littleEndian) { packed.append(contentsOf: $0) }
+        withUnsafeBytes(of: offset.littleEndian) { encoded.append(contentsOf: $0) }
 
-        return packed
+        return encoded
     }
 
     /// Check if tuple contains an incomplete versionstamp

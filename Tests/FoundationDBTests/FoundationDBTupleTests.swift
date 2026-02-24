@@ -36,7 +36,8 @@ func testTupleNil() throws {
 @Test("TupleString encoding and decoding")
 func tupleString() throws {
     let testString = "Hello, World!"
-    let encoded = testString.encodeTuple()
+    var encoded = FDB.Bytes()
+    testString.encodeTuple(into: &encoded)
 
     #expect(encoded.first == TupleTypeCode.string.rawValue, "TupleString should start with string type code")
     #expect(encoded.last == 0x00, "TupleString should end with null terminator")
@@ -50,7 +51,8 @@ func tupleString() throws {
 @Test("TupleString with null bytes")
 func tupleStringWithNulls() throws {
     let testString = "Hello\u{0}World"
-    let encoded = testString.encodeTuple()
+    var encoded = FDB.Bytes()
+    testString.encodeTuple(into: &encoded)
 
     #expect(encoded.contains(0x00), "Encoded string should contain null bytes")
     #expect(encoded.contains(0xFF), "Null bytes should be escaped with 0xFF")
@@ -65,8 +67,10 @@ func tupleBool() throws {
     let testTrue = true
     let testFalse = false
 
-    let encodedTrue = testTrue.encodeTuple()
-    let encodedFalse = testFalse.encodeTuple()
+    var encodedTrue = FDB.Bytes()
+    testTrue.encodeTuple(into: &encodedTrue)
+    var encodedFalse = FDB.Bytes()
+    testFalse.encodeTuple(into: &encodedFalse)
 
     #expect(encodedTrue == [TupleTypeCode.boolTrue.rawValue], "true should encode to boolTrue type code")
     #expect(encodedFalse == [TupleTypeCode.boolFalse.rawValue], "false should encode to boolFalse type code")
@@ -84,7 +88,8 @@ func tupleBool() throws {
 @Test("TupleFloat encoding and decoding")
 func tupleFloat() throws {
     let testFloat: Float = 3.14159
-    let encoded = testFloat.encodeTuple()
+    var encoded = FDB.Bytes()
+    testFloat.encodeTuple(into: &encoded)
 
     #expect(encoded.first == TupleTypeCode.float.rawValue, "Float should start with float type code")
     #expect(encoded.count == 5, "Float should be 5 bytes (1 type code + 4 data)")
@@ -98,7 +103,8 @@ func tupleFloat() throws {
 @Test("TupleDouble encoding and decoding")
 func tupleDouble() throws {
     let testDouble = 3.141592653589793
-    let encoded = testDouble.encodeTuple()
+    var encoded = FDB.Bytes()
+    testDouble.encodeTuple(into: &encoded)
 
     #expect(encoded.first == TupleTypeCode.double.rawValue, "Double should start with double type code")
     #expect(encoded.count == 9, "Double should be 9 bytes (1 type code + 8 data)")
@@ -112,7 +118,8 @@ func tupleDouble() throws {
 @Test("TupleUUID encoding and decoding")
 func tupleUUID() throws {
     let testUUID = UUID()
-    let encoded = testUUID.encodeTuple()
+    var encoded = FDB.Bytes()
+    testUUID.encodeTuple(into: &encoded)
 
     #expect(encoded.first == TupleTypeCode.uuid.rawValue, "UUID should start with uuid type code")
     #expect(encoded.count == 17, "UUID should be 17 bytes (1 type code + 16 data)")
@@ -126,7 +133,8 @@ func tupleUUID() throws {
 @Test("TupleInt64 encoding and decoding - Zero")
 func tupleInt64Zero() throws {
     let testInt: Int64 = 0
-    let encoded = testInt.encodeTuple()
+    var encoded = FDB.Bytes()
+    testInt.encodeTuple(into: &encoded)
 
     #expect(encoded == [TupleTypeCode.intZero.rawValue], "Zero should encode to intZero type code")
 
@@ -139,7 +147,8 @@ func tupleInt64Zero() throws {
 @Test("TupleInt64 encoding and decoding - Small positive")
 func tupleInt64SmallPositive() throws {
     let testInt: Int64 = 42
-    let encoded = testInt.encodeTuple()
+    var encoded = FDB.Bytes()
+    testInt.encodeTuple(into: &encoded)
 
     #expect(encoded.first == 0x15, "Small positive should use 0x15 type code (positiveInt1)")
 
@@ -152,7 +161,8 @@ func tupleInt64SmallPositive() throws {
 @Test("TupleInt64 encoding and decoding - Very small negative")
 func tupleInt64VerySmallNegative() throws {
     let testInt: Int64 = -42
-    let encoded = testInt.encodeTuple()
+    var encoded = FDB.Bytes()
+    testInt.encodeTuple(into: &encoded)
 
     #expect(encoded.first == 0x13)
 
@@ -165,7 +175,8 @@ func tupleInt64VerySmallNegative() throws {
 @Test("TupleInt64 encoding and decoding - Large negative")
 func tupleInt64LargeNegative() throws {
     let testInt: Int64 = -89_034_333_444
-    let encoded = testInt.encodeTuple()
+    var encoded = FDB.Bytes()
+    testInt.encodeTuple(into: &encoded)
 
     var offset = 1
     let decoded = try Int64.decodeTuple(from: encoded, at: &offset)
@@ -176,7 +187,8 @@ func tupleInt64LargeNegative() throws {
 @Test("TupleInt64 encoding and decoding - Very Large negative")
 func tupleInt64VeryLargeNegative() throws {
     let testInt: Int64 = -(1 << 55) - 34_897_432
-    let encoded = testInt.encodeTuple()
+    var encoded = FDB.Bytes()
+    testInt.encodeTuple(into: &encoded)
 
     var offset = 1
     let decoded = try Int64.decodeTuple(from: encoded, at: &offset)
@@ -187,7 +199,8 @@ func tupleInt64VeryLargeNegative() throws {
 @Test("TupleInt64 encoding and decoding - VeryVery Large negative")
 func tupleInt64VeryLargeNegative2() throws {
     let testInt: Int64 = -(1 << 60) - 34_897_432
-    let encoded = testInt.encodeTuple()
+    var encoded = FDB.Bytes()
+    testInt.encodeTuple(into: &encoded)
 
     var offset = 1
     let decoded = try Int64.decodeTuple(from: encoded, at: &offset)
@@ -200,8 +213,10 @@ func tupleInt64LargeValues() throws {
     let largePositive = Int64.max
     let largeNegative = Int64.min + 1
 
-    let encodedPos = largePositive.encodeTuple()
-    let encodedNeg = largeNegative.encodeTuple()
+    var encodedPos = FDB.Bytes()
+    largePositive.encodeTuple(into: &encodedPos)
+    var encodedNeg = FDB.Bytes()
+    largeNegative.encodeTuple(into: &encodedNeg)
 
     var offsetPos = 1
     var offsetNeg = 1
@@ -309,7 +324,8 @@ func tupleInt64DistributedIntegers() throws {
     var negative = 0
     for _ in 0 ..< 1_000_000 {
         let testInt = nextRandom()
-        let encoded = testInt.encodeTuple()
+        var encoded = FDB.Bytes()
+        testInt.encodeTuple(into: &encoded)
 
         if testInt > 0 {
             positive += 1

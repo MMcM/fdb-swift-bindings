@@ -132,7 +132,8 @@ struct VersionstampTests {
     @Test("Versionstamp encodeTuple")
     func testEncodeTuple() {
         let vs = Versionstamp.incomplete(userVersion: 0)
-        let encoded = vs.encodeTuple()
+        var encoded = FDB.Bytes()
+        vs.encodeTuple(into: &encoded)
 
         #expect(encoded.count == 13)  // 1 byte type code + 12 bytes versionstamp
         #expect(encoded[0] == 0x33)  // TupleTypeCode.versionstamp
@@ -142,7 +143,8 @@ struct VersionstampTests {
     @Test("Versionstamp decodeTuple")
     func testDecodeTuple() throws {
         let vs = Versionstamp.incomplete(userVersion: 42)
-        let encoded = vs.encodeTuple()
+        var encoded = FDB.Bytes()
+        vs.encodeTuple(into: &encoded)
 
         var offset = 1  // Skip type code
         let decoded = try Versionstamp.decodeTuple(from: encoded, at: &offset)
