@@ -262,10 +262,10 @@ func tupleWithZero() throws {
     let decoded = try Tuple.decode(from: encoded)
 
     #expect(decoded.count == 3, "Should have 3 elements")
-    let decodedString1 = decoded[0]?.convert(String.self)
+    let decodedString1 = decoded[0].convert(String.self)
     #expect(decodedString1 == "hello")
 
-    let decodedInt = decoded[1]?.convert(Int64.self)
+    let decodedInt = decoded[1].convert(Int64.self)
     #expect(decodedInt == 0)
 
     let decodedString2 = decoded[2, as:String.self]

@@ -183,7 +183,7 @@ public protocol TupleElementConvertible {
     func tupleElement() -> TupleElement
 
     // TODO: This could instead be init?, I think. Is that better?
-    static func fromTuple(element: TupleElement?) -> Self?
+    static func fromTuple(element: TupleElement) -> Self?
 }
 
 extension TupleElement: TupleElementConvertible {
@@ -191,7 +191,7 @@ extension TupleElement: TupleElementConvertible {
         self
     }
 
-    public static func fromTuple(element: TupleElement?) -> TupleElement? {
+    public static func fromTuple(element: TupleElement) -> TupleElement? {
         element
     }
 }
@@ -222,16 +222,12 @@ public struct Tuple: Sendable, Hashable, Equatable, Comparable, CustomStringConv
         self.init(elements)
     }
 
-    // TODO: Result is optional, like a Dictionary and not like a Collection. Is that right?
-    //  Should this implement more of [RandomAccess]Collection or is using elements array sufficient?
-
-    public subscript(index: Int) -> TupleElement? {
-        guard index >= 0, index < elements.count else { return nil }
-        return elements[index]
-    }
-
     public var count: Int {
         elements.count
+    }
+
+    public subscript(index: Int) -> TupleElement {
+        return elements[index]
     }
 
     public func encode() -> FDB.Bytes {
@@ -330,7 +326,7 @@ extension String: TupleElementConvertible {
         .string(self)
     }
 
-    public static func fromTuple(element: TupleElement?) -> String? {
+    public static func fromTuple(element: TupleElement) -> String? {
         switch element {
         case let .string(s):
             return s
@@ -384,7 +380,7 @@ extension FDB.Bytes: TupleElementConvertible {
         .bytes(self)
     }
 
-    public static func fromTuple(element: TupleElement?) -> FDB.Bytes? {
+    public static func fromTuple(element: TupleElement) -> FDB.Bytes? {
         switch element {
         case let .bytes(b):
             return b
@@ -436,7 +432,7 @@ extension Bool: TupleElementConvertible {
         .bool(self)
     }
 
-    public static func fromTuple(element: TupleElement?) -> Bool? {
+    public static func fromTuple(element: TupleElement) -> Bool? {
         switch element {
         case let .bool(b):
             return b
@@ -473,7 +469,7 @@ extension Float: TupleElementConvertible {
         .float(self)
     }
 
-    public static func fromTuple(element: TupleElement?) -> Float? {
+    public static func fromTuple(element: TupleElement) -> Float? {
         switch element {
         case let .float(f):
             return f
@@ -513,7 +509,7 @@ extension Double: TupleElementConvertible {
         .double(self)
     }
 
-    public static func fromTuple(element: TupleElement?) -> Double? {
+    public static func fromTuple(element: TupleElement) -> Double? {
         switch element {
         case let .double(d):
             return d
@@ -553,7 +549,7 @@ extension UUID: TupleElementConvertible {
         .uuid(self)
     }
 
-    public static func fromTuple(element: TupleElement?) -> UUID? {
+    public static func fromTuple(element: TupleElement) -> UUID? {
         switch element {
         case let .uuid(u):
             return u
@@ -597,7 +593,7 @@ extension Versionstamp: TupleElementConvertible {
         .versionstamp(self)
     }
 
-    public static func fromTuple(element: TupleElement?) -> Versionstamp? {
+    public static func fromTuple(element: TupleElement) -> Versionstamp? {
         switch element {
         case let .versionstamp(v):
             return v
@@ -651,7 +647,7 @@ extension Int64: TupleElementConvertible {
         .int(self)
     }
 
-    public static func fromTuple(element: TupleElement?) -> Int64? {
+    public static func fromTuple(element: TupleElement) -> Int64? {
         switch element {
         case let .int(i):
             return i
@@ -746,7 +742,7 @@ extension Tuple: TupleElementConvertible {
         .nested(self)
     }
 
-    public static func fromTuple(element: TupleElement?) -> Tuple? {
+    public static func fromTuple(element: TupleElement) -> Tuple? {
         switch element {
         case let .nested(t):
             return t
@@ -801,7 +797,7 @@ extension Int: TupleElementConvertible {
         .int(Int64(self))
     }
 
-    public static func fromTuple(element: TupleElement?) -> Int? {
+    public static func fromTuple(element: TupleElement) -> Int? {
         switch element {
         case let .int(i):
             return Int(i)
@@ -816,7 +812,7 @@ extension Int32: TupleElementConvertible {
         .int(Int64(self))
     }
 
-    public static func fromTuple(element: TupleElement?) -> Int32? {
+    public static func fromTuple(element: TupleElement) -> Int32? {
         switch element {
         case let .int(i):
             return Int32(i)
@@ -961,7 +957,7 @@ extension Tuple {
 
     public func convert<each T: TupleElementConvertible>(_ type:(repeat each T).Type) -> (repeat each T) {
         var i = 0
-        func _next() -> TupleElement? {
+        func _next() -> TupleElement {
             let e = self[i]
             i += 1
             return e
