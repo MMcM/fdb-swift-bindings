@@ -147,7 +147,7 @@ struct VersionstampTests {
         vs.encodeTuple(into: &encoded)
 
         var offset = 1  // Skip type code
-        let decoded = try Versionstamp.decodeTuple(from: encoded, at: &offset)
+        let decoded = try Versionstamp.decodeTuple(from: encoded, at: &offset, typeCode: encoded[0])
 
         #expect(decoded == vs)
         #expect(offset == 13)

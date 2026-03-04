@@ -167,12 +167,11 @@ public struct Subspace: Sendable {
     ///
     /// This operation is the inverse of `encode(_:)`. It removes the subspace prefix
     /// and decodes the remaining bytes as a tuple.
-    public func decode(_ key: FDB.Bytes) throws -> Tuple {
+    public func decode<B: Collection<UInt8>>(_ key: B) throws -> Tuple {
         guard key.starts(with: prefix) else {
             throw TupleError.invalidDecoding("Key does not match subspace prefix")
         }
-        let tupleBytes = Array(key.dropFirst(prefix.count))
-        return try Tuple.decode(from: tupleBytes)
+        return try Tuple.decode(from: key.dropFirst(prefix.count))
     }
 
     /// Check if a key belongs to this subspace
