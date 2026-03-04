@@ -27,6 +27,8 @@ public enum TupleError: Error, Sendable {
     case unsupportedType
 }
 
+// MARK: Elements
+
 enum TupleTypeCode: UInt8, CaseIterable {
     case null = 0x00
     case bytes = 0x01
@@ -232,6 +234,8 @@ protocol TupleCodable {
     static func decodeTuple(from: FDB.Bytes, at: inout Int) throws -> Self
 }
 
+// MARK: Tuple object
+
 /// A tuple represents an ordered collection of elements that can be encoded to and decoded from bytes.
 ///
 /// Tuples can be used as keys in FoundationDB, and their encoding preserves lexicographic ordering.
@@ -372,6 +376,8 @@ extension Tuple {
         return elements[index].convert(type)
     }
 }
+
+// MARK: Specific element types
 
 extension String: TupleElementConvertible {
     public func tupleElement() -> TupleElement {
@@ -887,6 +893,8 @@ extension Int32: TupleElementConvertible {
     }
 }
 
+// MARK: Versionstamp support
+
 extension Tuple {
 
     /// Pack tuple with an incomplete versionstamp and append offset
@@ -1003,7 +1011,7 @@ extension Tuple {
     }
 }
 
-// TODO: Make a TypedTuple so that we don't have to typecast manually.
+// MARK: Type-safe tuples
 
 extension Tuple {
     init<each T: TupleElementConvertible>(_ elements: (repeat each T)) {
