@@ -213,7 +213,6 @@ public enum TupleElement: Sendable, Hashable, Equatable, Comparable {
 public protocol TupleElementConvertible {
     func tupleElement() -> TupleElement
 
-    // TODO: This could instead be init?, I think. Is that better?
     static func fromTuple(element: TupleElement) -> Self?
 }
 
@@ -241,7 +240,6 @@ protocol TupleCodable {
 /// Tuples can be used as keys in FoundationDB, and their encoding preserves lexicographic ordering.
 ///
 public struct Tuple: Sendable, Hashable, Equatable, Comparable, CustomStringConvertible {
-    // TODO: Any issues with making this public?
     public let elements: [TupleElement]
 
     public init(_ elements: [TupleElement]) {
@@ -370,7 +368,6 @@ extension TupleElement {
 }
 
 extension Tuple {
-    // TODO: Is this worth having?
     public subscript<T: TupleElementConvertible>(index: Int, as type: T.Type) -> T? {
         guard index >= 0, index < elements.count else { return nil }
         return elements[index].convert(type)
@@ -1027,7 +1024,7 @@ extension Tuple {
     }
 
     public static func encode<each T: TupleElementConvertible>(_ elements: (repeat each T)) -> FDB.Bytes {
-        // TODO: The DRY version of this that uses the above crashes the compiler.
+        // TODO: The DRY version of this that uses the above crashes / hangs the compiler.
         var tupleElements: [TupleElement] = []
         for e in repeat each elements {
             tupleElements.append(e.tupleElement())
