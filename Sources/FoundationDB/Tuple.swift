@@ -550,8 +550,9 @@ extension Float: TupleCodable {
     func encodeTuple(into encoded: inout FDB.Bytes) {
         encoded.append(TupleTypeCode.float.rawValue)
         let bitPattern = self.bitPattern
-        let bytes = withUnsafeBytes(of: bitPattern.bigEndian) { Array($0) }
-        encoded.append(contentsOf: bytes)
+        withUnsafeBytes(of: bitPattern.bigEndian) { bytes in
+            encoded.append(contentsOf: bytes)
+        }
     }
 
     static func decodeTuple<B: Collection<UInt8>>(from bytes: B, at offset: inout B.Index, typeCode: UInt8) throws -> Float {
@@ -594,8 +595,9 @@ extension Double: TupleCodable {
     func encodeTuple(into encoded: inout FDB.Bytes) {
         encoded.append(TupleTypeCode.double.rawValue)
         let bitPattern = self.bitPattern
-        let bytes = withUnsafeBytes(of: bitPattern.bigEndian) { Array($0) }
-        encoded.append(contentsOf: bytes)
+        withUnsafeBytes(of: bitPattern.bigEndian) { bytes in
+            encoded.append(contentsOf: bytes)
+        }
     }
 
     static func decodeTuple<B: Collection<UInt8>>(from bytes: B, at offset: inout B.Index, typeCode: UInt8) throws -> Double {
@@ -752,8 +754,9 @@ extension Int64: TupleCodable {
             let n = bisectLeft(UInt64(self))
             encoded.append(TupleTypeCode.intZero.rawValue + UInt8(n))
             let bigEndianValue = UInt64(bitPattern: self).bigEndian
-            let bytes = withUnsafeBytes(of: bigEndianValue) { Array($0) }
-            encoded.append(contentsOf: bytes.suffix(n))
+            withUnsafeBytes(of: bigEndianValue) { bytes in
+                encoded.append(contentsOf: bytes.suffix(n))
+            }
         } else {
             let n = bisectLeft(UInt64(-self))
             encoded.append(TupleTypeCode.intZero.rawValue - UInt8(n))
@@ -761,14 +764,16 @@ extension Int64: TupleCodable {
             if n < 8 {
                 let offset = UInt64(sizeLimits[n]) &+ UInt64(bitPattern: self)
                 let bigEndianValue = offset.bigEndian
-                let bytes = withUnsafeBytes(of: bigEndianValue) { Array($0) }
-                encoded.append(contentsOf: bytes.suffix(n))
+                withUnsafeBytes(of: bigEndianValue) { bytes in
+                    encoded.append(contentsOf: bytes.suffix(n))
+                }
             } else {
                 // n == 8 case
                 let offset = UInt64(bitPattern: self)
                 let bigEndianValue = offset.bigEndian
-                let bytes = withUnsafeBytes(of: bigEndianValue) { Array($0) }
-                encoded.append(contentsOf: bytes)
+                withUnsafeBytes(of: bigEndianValue) { bytes in
+                    encoded.append(contentsOf: bytes)
+                }
             }
         }
     }
